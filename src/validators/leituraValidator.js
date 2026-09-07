@@ -14,7 +14,7 @@ const FAIXAS = {
 
 const leituraSchema = Joi.object({
   dispositivoId: Joi.string().trim().min(1).required(),
-  valor: Joi.number().finite().required(),
+  valor: Joi.number().required(),
   tipo: Joi.string().valid(...TIPOS_VALIDOS).required(),
   horarioLeitura: Joi.string().isoDate().optional(), // se ausente, servidor usa Date.now()
 });
@@ -23,6 +23,13 @@ function validarLeitura(payload) {
   const { error, value } = leituraSchema.validate(payload, { abortEarly: false, stripUnknown: true });
   if (error) {
     return { valido: false, erros: error.details.map((d) => d.message) };
+  }
+
+  // Checagem explícita de NaN/Infinity — feita aqui (em vez de depender de
+  // um método específico do Joi) para não quebrar de novo se a biblioteca
+  // mudar de versão outra vez.
+  if (!Number.isFinite(value.valor)) {
+    return { valido: false, erros: [`Valor "${value.valor}" não é um número finito válido.`] };
   }
 
   const faixa = FAIXAS[value.tipo];
