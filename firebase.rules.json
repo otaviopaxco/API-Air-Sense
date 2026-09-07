@@ -1,0 +1,7 @@
+{
+  "_comentario": "Nesta arquitetura, ESP32 e o app NUNCA acessam o Firebase diretamente — só falam com a API Node.js, que usa o Firebase Admin SDK (que ignora estas regras). Por isso negamos todo acesso direto via SDKs cliente. Só mude isso se decidir dar acesso direto a algum cliente autenticado via Firebase Auth.",
+  "rules": {
+    ".read": false,
+    ".write": false
+  }
+}
