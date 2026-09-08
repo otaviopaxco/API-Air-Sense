@@ -5,20 +5,20 @@ API em Node.js/Express que recebe leituras de sensores (CO2, CH4, VOC, Temperatu
 ## Arquitetura de dados
 
 ```
-dispositivos/{id}          → metadados do ESP32 (modelo, datas, sensores, ativo)
-leituras/{dispositivoId}/{pushId}     → leituras BRUTAS (a cada ~20s). Apagadas após a agregação horária.
-leituras_horarias/{dispositivoId}/{YYYY-MM-DDTHH} → MÉDIA por tipo de sensor daquela hora. Apagadas após 7 dias (configurável).
-locais/{id}                → ambientes monitorados (responsável, risco)
-usuarios/{id}               → usuários do sistema
-alertas/{pushId}            → gerados automaticamente quando um valor ultrapassa o limiar de segurança
+dispositivos/{id}: metadados do ESP32 (modelo, datas, sensores, ativo)
+leituras/{dispositivoId}/{pushId}: leituras brutas (a cada ~20s). Apagadas após a agregação horária.
+leituras_horarias/{dispositivoId}/{YYYY-MM-DDTHH}: Média por tipo de sensor daquela hora. Apagadas após 7 dias (configurável).
+locais/{id}: ambientes monitorados (responsável, risco)
+usuarios/{id}: usuários do sistema
+alertas/{pushId}: gerados automaticamente quando um valor ultrapassa o limite de segurança
 ```
 
-> Importante: só a API acessa o Firebase (via Admin SDK, com `serviceAccountKey`). ESP32 e app **nunca** falam direto com o Firebase — isso simplifica MUITO a segurança, porque toda validação, autenticação e regra de negócio fica centralizada num único lugar que você controla. Por isso `firebase.rules.json` bloqueia qualquer acesso direto de clientes.
+> Importante: só a API acessa o Firebase (via Admin SDK, com `serviceAccountKey`). ESP32 e app nunca falam direto com o Firebase, simplificando muito a segurança, porque toda validação, autenticação e regra de negócio fica centralizada num único lugar que você controla. Por isso `firebase.rules.json` bloqueia qualquer acesso direto de clientes.
 
-## Fluxo de dados (conforme pedido)
+## Fluxo de dados
 
-1. ESP32 envia 1 leitura a cada 20s → `POST /api/leituras`.
-2. A cada hora fechada (job cron, minuto 1), a API calcula a média de cada tipo de sensor das leituras daquela hora, salva em `leituras_horarias` e **apaga** as leituras brutas já processadas.
+1. ESP32 envia 1 leitura a cada 20s `POST /api/leituras`.
+2. A cada hora fechada (job cron, minuto 1), a API calcula a média de cada tipo de sensor das leituras daquela hora, salva em `leituras_horarias` e apaga as leituras brutas já processadas.
 3. Diariamente (03:10), a API apaga registros de `leituras_horarias` com mais de 7 dias (`HOURLY_RETENTION_DAYS`).
 4. O app consulta os dados via `GET`, autenticado com sua própria chave.
 
@@ -30,7 +30,7 @@ npm install
 cp .env.example .env
 ```
 
-1. No Firebase Console → *Configurações do projeto* → *Contas de serviço* → **Gerar nova chave privada**. Isso baixa um JSON.
+1. No Firebase Console > *Configurações do projeto* > *Contas de serviço* > **Gerar nova chave privada**. Isso baixa um JSON.
 2. Cole o conteúdo desse JSON (minificado, em uma linha) na variável `FIREBASE_SERVICE_ACCOUNT_JSON` do `.env`, **ou** salve o arquivo como `serviceAccountKey.json` na raiz do projeto (já está no `.gitignore`).
 3. Preencha `FIREBASE_DATABASE_URL` com a URL do seu Realtime Database.
 4. Gere chaves fortes e aleatórias para `ESP32_API_KEY` e `APP_API_KEY` (ex.: `openssl rand -hex 32`).
@@ -51,14 +51,14 @@ pm2 save
 pm2 startup   # configura para reiniciar no boot do servidor
 ```
 
-Coloque a API atrás de um proxy reverso com HTTPS (Nginx + Let's Encrypt/Certbot, ou Caddy) — nunca exponha a API diretamente em HTTP puro na internet, já que o ESP32 envia dados de sensores reais e usa uma chave estática no header.
+Coloque a API atrás de um proxy reverso com HTTPS (Nginx + Let's Encrypt/Certbot, ou Caddy). Nunca exponha a API diretamente em HTTP puro na internet, já que o ESP32 envia dados de sensores reais e usa uma chave estática no header.
 
 ## Múltiplos dispositivos (ESP32)
 
-O sistema já é multi-dispositivo por natureza (tudo é indexado por `dispositivoId`), mas a autenticação agora reforça isso: **cada ESP32 tem sua própria chave de API**, gerada no provisionamento, com hash salgado (scrypt) salvo no banco — nunca em texto plano. Vantagens:
+O sistema já é multi-dispositivo por natureza (tudo é indexado por `dispositivoId`), mas a autenticação agora reforça isso: **cada ESP32 tem sua própria chave de API**, gerada no provisionamento, com hash salgado (scrypt) salvo no banco, nunca em texto plano. As vantagens são:
 
 - Revogar/trocar a chave de um dispositivo comprometido não afeta os demais.
-- O rate limit (`60 req/min`) é aplicado **por `dispositivoId`**, não por IP — um ESP32 com bug não consome a cota de outro dispositivo atrás do mesmo roteador.
+- O rate limit (`60 req/min`) é aplicado por `dispositivoId`, não por IP — um ESP32 com bug não consome a cota de outro dispositivo atrás do mesmo roteador.
 - O job de agregação horária já processa todos os dispositivos cadastrados em `/dispositivos`, um a um, coordenando a agregação/limpeza de N sensores sem intervenção manual.
 - Cada leitura atualiza `dispositivos/{id}/ultimoContato` e `dispositivos/{id}/ultimaLeitura`, usados para calcular status **online/offline** (heartbeat, timeout configurável em `OFFLINE_THRESHOLD_SECONDS`, padrão 120s).
 
