@@ -10,6 +10,9 @@ const leiturasRouter = require('./src/routes/leituras');
 const recursosRouter = require('./src/routes/recursos');
 const resumoRouter = require('./src/routes/resumo');
 const adminRouter = require('./src/routes/admin');
+const dispositivosRouter = require('./src/routes/dispositivos');
+const usuariosRouter = require('./src/routes/usuarios');
+const alertasRouter = require('./src/routes/alertas');
 const { iniciarJobs } = require('./src/jobs/scheduler');
 
 const app = express();
@@ -35,6 +38,9 @@ app.get('/health', (req, res) => {
 app.use('/api/leituras', leiturasRouter);
 app.use('/api/resumo', resumoRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/dispositivos', dispositivosRouter);
+app.use('/api/usuarios', usuariosRouter);
+app.use('/api/alertas', alertasRouter);
 app.use('/api', recursosRouter);
 
 // 404

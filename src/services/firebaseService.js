@@ -1,5 +1,6 @@
 const { db } = require('../config/firebase');
 const { registrarContato } = require('./deviceService');
+const { notificarAlerta } = require('./notificationService');
 
 // Limiares simples para geração automática de alertas (ppm/°C/%).
 // Ajuste conforme a norma/realidade de cada tipo de ambiente monitorado.
@@ -36,18 +37,102 @@ async function gravarLeitura({ dispositivoId, valor, tipo, horarioLeitura }) {
   return { id: novaLeituraRef.key, timestamp };
 }
 
+/**
+ * Cria um alerta, mas evita duplicar: se já existe um alerta NÃO resolvido
+ * do mesmo tipo para o mesmo dispositivo, apenas atualiza o valor/horário
+ * dele (senão cada leitura acima do limite, a cada ~20s, geraria um novo
+ * alerta e um novo push). A notificação só é disparada na transição
+ * "sem alerta" -> "alerta ativo".
+ */
 async function criarAlerta({ dispositivoId, tipo, valor, timestamp }) {
+  const existentesSnap = await db
+    .ref('alertas')
+    .orderByChild('dispositivoId')
+    .equalTo(dispositivoId)
+    .once('value');
+  const existentes = existentesSnap.val() || {};
+
+  const alertaAtivoExistente = Object.entries(existentes).find(
+    ([, a]) => a.tipo === tipo && a.resolvido === false
+  );
+
+  if (alertaAtivoExistente) {
+    const [alertaId] = alertaAtivoExistente;
+    await db.ref(`alertas/${alertaId}`).update({ valorMedido: valor, horario: timestamp });
+    return alertaId;
+  }
+
   const alertaRef = db.ref('alertas').push();
   await alertaRef.set({
     dispositivoId,
     tipo,
     valorMedido: valor,
+    limite: LIMIARES_ALERTA[tipo] ?? null,
     descricao: `Nível de ${tipo} acima do limite seguro (${valor}) no dispositivo ${dispositivoId}`,
     risco: 6,
     horario: timestamp,
     resolvido: false,
   });
+
+  // Dispara push de forma assíncrona (não bloqueia a resposta ao ESP32
+  // nem falha a gravação da leitura caso o envio dê erro).
+  db.ref(`dispositivos/${dispositivoId}`)
+    .once('value')
+    .then((snap) => {
+      const nomeDispositivo = snap.val()?.nome || snap.val()?.modelo;
+      return notificarAlerta({ dispositivoId, nomeDispositivo, tipo, valorMedido: valor });
+    })
+    .catch((err) => console.error('[push] falha ao notificar alerta:', err));
+
   return alertaRef.key;
+}
+
+/**
+ * Tenta dispensar um alerta. Só é permitido se as últimas 5 leituras
+ * (brutas, mais recentes primeiro) daquele tipo de sensor no dispositivo
+ * estiverem dentro do limite seguro. Caso contrário, o alerta continua
+ * ativo e a função retorna `permitido: false`.
+ */
+async function dispensarAlerta(alertaId) {
+  const alertaSnap = await db.ref(`alertas/${alertaId}`).once('value');
+  const alerta = alertaSnap.val();
+  if (!alerta) return { encontrado: false };
+  if (alerta.resolvido) return { encontrado: true, permitido: true, jaResolvido: true };
+
+  const { dispositivoId, tipo } = alerta;
+  const limite = LIMIARES_ALERTA[tipo] ?? Infinity;
+
+  // Leituras brutas ainda não agregadas (última hora em andamento).
+  const leiturasSnap = await db.ref(`leituras/${dispositivoId}`).once('value');
+  const leituras = Object.values(leiturasSnap.val() || {})
+    .filter((l) => l.tipo === tipo)
+    .sort((a, b) => new Date(b.horarioLeitura) - new Date(a.horarioLeitura));
+
+  const ultimasCinco = leituras.slice(0, 5);
+
+  if (ultimasCinco.length < 5) {
+    return {
+      encontrado: true,
+      permitido: false,
+      motivo: `Ainda não há 5 leituras recentes de ${tipo} para confirmar a normalização (${ultimasCinco.length}/5).`,
+    };
+  }
+
+  const todasNormais = ultimasCinco.every((l) => l.valor < limite);
+  if (!todasNormais) {
+    return {
+      encontrado: true,
+      permitido: false,
+      motivo: `Ainda há leituras de ${tipo} acima do limite seguro nas últimas 5 amostras.`,
+    };
+  }
+
+  await db.ref(`alertas/${alertaId}`).update({
+    resolvido: true,
+    resolvidoEm: new Date().toISOString(),
+  });
+
+  return { encontrado: true, permitido: true };
 }
 
 /**

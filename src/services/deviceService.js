@@ -79,10 +79,95 @@ function calcularStatusOnline(ultimoContato) {
   return Date.now() - new Date(ultimoContato).getTime() <= OFFLINE_THRESHOLD_MS;
 }
 
+/**
+ * Deriva o status de exibição do app (Ativo, Offline, Alerta, Erro) a partir
+ * do estado bruto do dispositivo. Precedência: Erro > Alerta > Offline > Ativo.
+ *
+ * - Erro: dispositivo desativado/chave revogada, ou nunca recebeu nenhuma
+ *   leitura (falha de comunicação/provisionamento do ESP32).
+ * - Alerta: há pelo menos um alerta não resolvido e o dispositivo está online.
+ * - Offline: já se comunicou antes, mas o heartbeat expirou.
+ * - Ativo: online e sem alertas pendentes.
+ */
+function calcularStatusDispositivo(dispositivo, alertasNaoResolvidos = 0) {
+  if (!dispositivo) {
+    return { status: 'Erro', descricao: 'Dispositivo não encontrado.' };
+  }
+
+  if (dispositivo.ativo === false) {
+    return {
+      status: 'Erro',
+      descricao: 'Dispositivo desativado ou chave de acesso revogada. Reprovisione o ESP32.',
+    };
+  }
+
+  if (!dispositivo.ultimoContato) {
+    return {
+      status: 'Erro',
+      descricao:
+        'Nenhuma comunicação recebida do ESP32 ainda. Verifique a chave gravada no firmware e a conexão de rede/Wi-Fi do dispositivo.',
+    };
+  }
+
+  const online = calcularStatusOnline(dispositivo.ultimoContato);
+
+  if (online && alertasNaoResolvidos > 0) {
+    return {
+      status: 'Alerta',
+      descricao: `${alertasNaoResolvidos} alerta(s) ativo(s) neste dispositivo.`,
+    };
+  }
+
+  if (!online) {
+    return {
+      status: 'Offline',
+      descricao: `Sem contato há mais de ${Math.round(OFFLINE_THRESHOLD_MS / 1000)}s. Falha de comunicação com o ESP32 (rede/energia).`,
+    };
+  }
+
+  return { status: 'Ativo', descricao: 'Funcionando normalmente.' };
+}
+
+/**
+ * Renomeia um dispositivo (campo cosmético, não afeta o firmware nem a
+ * autenticação). Usado pela tela de detalhes do app.
+ */
+async function renomearDispositivo(dispositivoId, nome) {
+  await db.ref(`dispositivos/${dispositivoId}/nome`).set(nome);
+}
+
+/**
+ * Vincula/desvincula um dispositivo à lista pessoal de um usuário
+ * (usuarios/{uid}/dispositivos/{dispositivoId} = true). Isso não afeta o
+ * dispositivo em si — só controla o que aparece na tela inicial daquele
+ * usuário. Se nenhum usuário tiver o dispositivo vinculado ainda (app
+ * recém-instalado / uso single-tenant), o /api/resumo mostra todos.
+ */
+async function vincularDispositivoAoUsuario(usuarioId, dispositivoId) {
+  const snap = await db.ref(`dispositivos/${dispositivoId}`).once('value');
+  if (!snap.exists()) return null;
+  await db.ref(`usuarios/${usuarioId}/dispositivos/${dispositivoId}`).set(true);
+  return snap.val();
+}
+
+async function desvincularDispositivoDoUsuario(usuarioId, dispositivoId) {
+  await db.ref(`usuarios/${usuarioId}/dispositivos/${dispositivoId}`).remove();
+}
+
+async function listarDispositivosVinculados(usuarioId) {
+  const snap = await db.ref(`usuarios/${usuarioId}/dispositivos`).once('value');
+  return Object.keys(snap.val() || {});
+}
+
 module.exports = {
   provisionarDispositivo,
   validarChaveDispositivo,
   registrarContato,
   calcularStatusOnline,
+  calcularStatusDispositivo,
+  renomearDispositivo,
+  vincularDispositivoAoUsuario,
+  desvincularDispositivoDoUsuario,
+  listarDispositivosVinculados,
   OFFLINE_THRESHOLD_MS,
 };

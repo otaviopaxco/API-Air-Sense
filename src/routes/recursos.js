@@ -4,6 +4,7 @@ const router = express.Router();
 const { db } = require('../config/firebase');
 const { authenticateApp } = require('../middleware/auth');
 const { appLimiter } = require('../middleware/rateLimiter');
+const { calcularStatusOnline, calcularStatusDispositivo } = require('../services/deviceService');
 
 // Campos sensíveis que nunca devem sair da API para o app.
 const CAMPOS_OCULTOS = {
@@ -38,9 +39,32 @@ function crudSimples(caminho) {
 
   r.get('/:id', authenticateApp, appLimiter, async (req, res) => {
     try {
-      const snap = await db.ref(`${caminho}/${req.params.id}`).once('value');
+      const [snap, alertasSnap] = await Promise.all([
+        db.ref(`${caminho}/${req.params.id}`).once('value'),
+        caminho === 'dispositivos' ? db.ref('alertas').once('value') : Promise.resolve(null),
+      ]);
       if (!snap.exists()) return res.status(404).json({ erro: 'Não encontrado.' });
-      res.json(removerCamposOcultos(caminho, snap.val()));
+
+      const limpo = removerCamposOcultos(caminho, snap.val());
+
+      if (caminho === 'dispositivos') {
+        const alertas = alertasSnap.val() || {};
+        const alertasNaoResolvidos = Object.values(alertas).filter(
+          (a) => a.dispositivoId === req.params.id && a.resolvido === false
+        ).length;
+        const { status, descricao } = calcularStatusDispositivo(limpo, alertasNaoResolvidos);
+        return res.json({
+          dispositivoId: req.params.id,
+          ...limpo,
+          nome: limpo.nome || limpo.modelo,
+          online: calcularStatusOnline(limpo.ultimoContato),
+          status,
+          descricaoStatus: descricao,
+          alertasNaoResolvidos,
+        });
+      }
+
+      res.json(limpo);
     } catch (err) {
       console.error(`[GET /${caminho}/:id] erro:`, err);
       res.status(500).json({ erro: `Falha ao consultar ${caminho}.` });

@@ -4,14 +4,19 @@ const router = express.Router();
 const { db } = require('../config/firebase');
 const { authenticateApp } = require('../middleware/auth');
 const { appLimiter } = require('../middleware/rateLimiter');
-const { calcularStatusOnline } = require('../services/deviceService');
+const {
+  calcularStatusOnline,
+  calcularStatusDispositivo,
+  listarDispositivosVinculados,
+} = require('../services/deviceService');
 
 /**
- * GET /api/resumo
- * Pensado para a tela inicial do app: todos os dispositivos, com sua
- * última leitura por tipo de sensor, status online/offline calculado a
- * partir do heartbeat, e contagem de alertas não resolvidos — tudo em
- * uma única requisição (evita N chamadas do app a cada abertura de tela).
+ * GET /api/resumo?usuarioId=xxx
+ * Pensado para a tela inicial do app: dispositivos (do usuário, se
+ * `usuarioId` for informado e ele já tiver algum vínculo; senão todos —
+ * útil no primeiro uso/single-tenant), com última leitura por sensor,
+ * status derivado (Ativo/Offline/Alerta/Erro) e contagem de alertas —
+ * tudo em uma única requisição.
  */
 router.get('/', authenticateApp, appLimiter, async (req, res) => {
   try {
@@ -31,15 +36,30 @@ router.get('/', authenticateApp, appLimiter, async (req, res) => {
       }
     }
 
-    const resumo = Object.entries(dispositivos).map(([id, d]) => ({
-      dispositivoId: id,
-      modelo: d.modelo,
-      ativo: d.ativo !== false,
-      online: calcularStatusOnline(d.ultimoContato),
-      ultimoContato: d.ultimoContato || null,
-      ultimaLeitura: d.ultimaLeitura || {},
-      alertasNaoResolvidos: alertasNaoResolvidosPorDispositivo[id] || 0,
-    }));
+    let idsPermitidos = null;
+    if (req.query.usuarioId) {
+      const vinculados = await listarDispositivosVinculados(req.query.usuarioId);
+      if (vinculados.length > 0) idsPermitidos = new Set(vinculados);
+    }
+
+    const resumo = Object.entries(dispositivos)
+      .filter(([id]) => !idsPermitidos || idsPermitidos.has(id))
+      .map(([id, d]) => {
+        const alertasNaoResolvidos = alertasNaoResolvidosPorDispositivo[id] || 0;
+        const { status, descricao } = calcularStatusDispositivo(d, alertasNaoResolvidos);
+        return {
+          dispositivoId: id,
+          nome: d.nome || d.modelo,
+          modelo: d.modelo,
+          ativo: d.ativo !== false,
+          online: calcularStatusOnline(d.ultimoContato),
+          status,
+          descricaoStatus: descricao,
+          ultimoContato: d.ultimoContato || null,
+          ultimaLeitura: d.ultimaLeitura || {},
+          alertasNaoResolvidos,
+        };
+      });
 
     return res.json({
       geradoEm: new Date().toISOString(),
