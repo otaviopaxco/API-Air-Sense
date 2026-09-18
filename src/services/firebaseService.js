@@ -227,9 +227,38 @@ async function purgarLeiturasHorariasAntigas(diasRetencao = 7) {
   return { apagados };
 }
 
+/**
+ * Remove alertas já dispensados (resolvido = true) há mais de 7 dias.
+ * Alertas ainda ativos nunca são apagados por aqui, só quando dispensados.
+ */
+async function purgarAlertasResolvidosAntigos() {
+  const LIMITE_DIAS = 7;
+  const limite = new Date(Date.now() - LIMITE_DIAS * 24 * 60 * 60 * 1000);
+
+  const snap = await db.ref('alertas').once('value');
+  const alertas = snap.val() || {};
+  const updates = {};
+  let apagados = 0;
+
+  for (const [id, alerta] of Object.entries(alertas)) {
+    if (alerta.resolvido && alerta.resolvidoEm && new Date(alerta.resolvidoEm) < limite) {
+      updates[`alertas/${id}`] = null;
+      apagados += 1;
+    }
+  }
+
+  if (apagados > 0) {
+    await db.ref().update(updates);
+  }
+
+  return { apagados };
+}
+
 module.exports = {
   gravarLeitura,
   criarAlerta,
+  dispensarAlerta,
   agregarLeiturasDaUltimaHora,
   purgarLeiturasHorariasAntigas,
+  purgarAlertasResolvidosAntigos,
 };

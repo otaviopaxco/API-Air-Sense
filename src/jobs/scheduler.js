@@ -1,5 +1,9 @@
 const cron = require('node-cron');
-const { agregarLeiturasDaUltimaHora, purgarLeiturasHorariasAntigas } = require('../services/firebaseService');
+const {
+  agregarLeiturasDaUltimaHora,
+  purgarLeiturasHorariasAntigas,
+  purgarAlertasResolvidosAntigos,
+} = require('../services/firebaseService');
 
 function iniciarJobs() {
   // Ao minuto 1 de cada hora: agrega a hora que acabou de fechar e apaga
@@ -26,7 +30,18 @@ function iniciarJobs() {
     }
   });
 
-  console.log('[jobs] Agendamento iniciado: agregação horária (min 1) e purga diária (03:10).');
+  // Diariamente às 03:20: apaga alertas já DISPENSADOS há mais de 7 dias.
+  // Alertas ainda ativos nunca são afetados por este job.
+  cron.schedule('20 3 * * *', async () => {
+    try {
+      const { apagados } = await purgarAlertasResolvidosAntigos();
+      console.log(`[job:purga-alertas] ${new Date().toISOString()} — ${apagados} alerta(s) dispensado(s) removido(s) (>7d).`);
+    } catch (err) {
+      console.error('[job:purga-alertas] erro:', err);
+    }
+  });
+
+  console.log('[jobs] Agendamento iniciado: agregação horária (min 1), purga diária de leituras (03:10) e de alertas dispensados (03:20).');
 }
 
 module.exports = { iniciarJobs };

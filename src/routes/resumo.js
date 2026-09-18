@@ -12,11 +12,10 @@ const {
 
 /**
  * GET /api/resumo?usuarioId=xxx
- * Pensado para a tela inicial do app: dispositivos (do usuário, se
- * `usuarioId` for informado e ele já tiver algum vínculo; senão todos —
- * útil no primeiro uso/single-tenant), com última leitura por sensor,
- * status derivado (Ativo/Offline/Alerta/Erro) e contagem de alertas —
- * tudo em uma única requisição.
+ * Pensado para a tela inicial do app: só os dispositivos vinculados a esse
+ * usuário (usuarios/{uid}/dispositivos), com última leitura por sensor,
+ * status derivado (Ativo/Offline/Alerta/Erro) e contagem de alertas — tudo
+ * em uma única requisição. Sem `usuarioId`, devolve todos (uso administrativo/depuração).
  */
 router.get('/', authenticateApp, appLimiter, async (req, res) => {
   try {
@@ -36,17 +35,22 @@ router.get('/', authenticateApp, appLimiter, async (req, res) => {
       }
     }
 
+    // Com usuarioId informado, filtra SEMPRE pela lista de vínculos dele —
+    // mesmo que esteja vazia (usuário novo deve ver 0 dispositivos, nunca
+    // a lista de outra pessoa).
     let idsPermitidos = null;
     if (req.query.usuarioId) {
       const vinculados = await listarDispositivosVinculados(req.query.usuarioId);
-      if (vinculados.length > 0) idsPermitidos = new Set(vinculados);
+      idsPermitidos = new Set(vinculados);
     }
 
+    const contagemPorStatus = { Ativo: 0, Offline: 0, Alerta: 0, Erro: 0 };
     const resumo = Object.entries(dispositivos)
       .filter(([id]) => !idsPermitidos || idsPermitidos.has(id))
       .map(([id, d]) => {
         const alertasNaoResolvidos = alertasNaoResolvidosPorDispositivo[id] || 0;
         const { status, descricao } = calcularStatusDispositivo(d, alertasNaoResolvidos);
+        contagemPorStatus[status] = (contagemPorStatus[status] || 0) + 1;
         return {
           dispositivoId: id,
           nome: d.nome || d.modelo,
@@ -66,6 +70,7 @@ router.get('/', authenticateApp, appLimiter, async (req, res) => {
       totalDispositivos: resumo.length,
       dispositivosOnline: resumo.filter((d) => d.online).length,
       totalAlertasNaoResolvidos: Object.values(alertasNaoResolvidosPorDispositivo).reduce((a, b) => a + b, 0),
+      contagemPorStatus,
       dispositivos: resumo,
     });
   } catch (err) {
