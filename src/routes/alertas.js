@@ -5,11 +5,15 @@ const { db } = require('../config/firebase');
 const { authenticateApp } = require('../middleware/auth');
 const { appLimiter } = require('../middleware/rateLimiter');
 const { dispensarAlerta } = require('../services/firebaseService');
+const { listarDispositivosVinculados } = require('../services/deviceService');
 
 /**
- * GET /api/alertas/lista?status=ativos|dispensados
+ * GET /api/alertas/lista?status=ativos|dispensados&usuarioId=xxx
  * Lista alertas já com o nome/modelo do dispositivo embutido (evita o app
  * ter que cruzar com /dispositivos manualmente), mais recentes primeiro.
+ * Com `usuarioId`, só devolve alertas de dispositivos vinculados a esse
+ * usuário (mesma regra do /api/resumo) — sem isso, qualquer usuário via
+ * alertas de aparelhos de outras pessoas.
  */
 router.get('/lista', authenticateApp, appLimiter, async (req, res) => {
   try {
@@ -22,11 +26,19 @@ router.get('/lista', authenticateApp, appLimiter, async (req, res) => {
     const dispositivos = dispositivosSnap.val() || {};
     const filtro = req.query.status;
 
-    let lista = Object.entries(alertas).map(([id, a]) => ({
-      id,
-      ...a,
-      nomeDispositivo: dispositivos[a.dispositivoId]?.nome || dispositivos[a.dispositivoId]?.modelo || a.dispositivoId,
-    }));
+    let idsPermitidos = null;
+    if (req.query.usuarioId) {
+      const vinculados = await listarDispositivosVinculados(req.query.usuarioId);
+      idsPermitidos = new Set(vinculados);
+    }
+
+    let lista = Object.entries(alertas)
+      .filter(([, a]) => !idsPermitidos || idsPermitidos.has(a.dispositivoId))
+      .map(([id, a]) => ({
+        id,
+        ...a,
+        nomeDispositivo: dispositivos[a.dispositivoId]?.nome || dispositivos[a.dispositivoId]?.modelo || a.dispositivoId,
+      }));
 
     if (filtro === 'ativos') lista = lista.filter((a) => a.resolvido === false);
     if (filtro === 'dispensados') lista = lista.filter((a) => a.resolvido === true);

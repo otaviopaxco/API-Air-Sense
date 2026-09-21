@@ -139,9 +139,8 @@ async function renomearDispositivo(dispositivoId, nome) {
 /**
  * Vincula/desvincula um dispositivo à lista pessoal de um usuário
  * (usuarios/{uid}/dispositivos/{dispositivoId} = true). Isso não afeta o
- * dispositivo em si — só controla o que aparece na tela inicial daquele
- * usuário. Se nenhum usuário tiver o dispositivo vinculado ainda (app
- * recém-instalado / uso single-tenant), o /api/resumo mostra todos.
+ * dispositivo em si — só controla o que aparece na tela daquele usuário
+ * (/api/resumo e /api/alertas/lista filtram sempre por esses vínculos).
  */
 async function vincularDispositivoAoUsuario(usuarioId, dispositivoId) {
   const snap = await db.ref(`dispositivos/${dispositivoId}`).once('value');

@@ -3,17 +3,24 @@ const { db } = require('../config/firebase');
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
 /**
- * Coleta os Expo Push Tokens de todos os usuários cadastrados em /usuarios.
+ * Coleta os Expo Push Tokens apenas dos usuários que têm este dispositivo
+ * vinculado à própria lista (usuarios/{uid}/dispositivos/{dispositivoId} = true).
  * Tokens são salvos pelo app em usuarios/{uid}/pushTokens/{token} = true
  * (um usuário pode ter mais de um dispositivo/celular logado).
+ *
+ * Importante: NÃO notificar todos os usuários cadastrados — só quem
+ * vinculou esse dispositivo específico (mesma regra usada por /api/resumo
+ * e /api/alertas/lista), senão um usuário recebe push de um alerta que
+ * nem aparece pra ele dentro do app.
  */
-async function coletarPushTokens() {
+async function coletarPushTokensDoDispositivo(dispositivoId) {
   const snap = await db.ref('usuarios').once('value');
   const usuarios = snap.val() || {};
   const tokens = new Set();
 
   for (const usuario of Object.values(usuarios)) {
-    if (usuario?.pushTokens) {
+    const vinculado = usuario?.dispositivos?.[dispositivoId];
+    if (vinculado && usuario?.pushTokens) {
       Object.keys(usuario.pushTokens).forEach((t) => tokens.add(t));
     }
   }
@@ -70,10 +77,11 @@ async function enviarPush(tokens, { titulo, corpo, dados }) {
 }
 
 /**
- * Notifica todos os usuários cadastrados sobre um novo alerta.
+ * Notifica apenas os usuários que têm este dispositivo vinculado sobre um
+ * novo alerta.
  */
 async function notificarAlerta({ dispositivoId, nomeDispositivo, tipo, valorMedido }) {
-  const tokens = await coletarPushTokens();
+  const tokens = await coletarPushTokensDoDispositivo(dispositivoId);
   await enviarPush(tokens, {
     titulo: `Alerta em ${nomeDispositivo || dispositivoId}`,
     corpo: `${tipo} acima do limite seguro (${valorMedido}).`,

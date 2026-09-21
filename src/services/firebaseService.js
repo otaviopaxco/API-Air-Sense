@@ -88,10 +88,11 @@ async function criarAlerta({ dispositivoId, tipo, valor, timestamp }) {
 }
 
 /**
- * Tenta dispensar um alerta. Só é permitido se as últimas 5 leituras
- * (brutas, mais recentes primeiro) daquele tipo de sensor no dispositivo
- * estiverem dentro do limite seguro. Caso contrário, o alerta continua
- * ativo e a função retorna `permitido: false`.
+ * Tenta dispensar um alerta. Só é permitido se as últimas 5 amostras
+ * (leituras brutas mais médias horárias como complemento, mais recentes
+ * primeiro) daquele tipo de sensor no dispositivo estiverem dentro do
+ * limite seguro. Caso contrário, o alerta continua ativo e a função
+ * retorna `permitido: false`.
  */
 async function dispensarAlerta(alertaId) {
   const alertaSnap = await db.ref(`alertas/${alertaId}`).once('value');
@@ -104,26 +105,44 @@ async function dispensarAlerta(alertaId) {
 
   // Leituras brutas ainda não agregadas (última hora em andamento).
   const leiturasSnap = await db.ref(`leituras/${dispositivoId}`).once('value');
-  const leituras = Object.values(leiturasSnap.val() || {})
+  const amostras = Object.values(leiturasSnap.val() || {})
     .filter((l) => l.tipo === tipo)
-    .sort((a, b) => new Date(b.horarioLeitura) - new Date(a.horarioLeitura));
+    .sort((a, b) => new Date(b.horarioLeitura) - new Date(a.horarioLeitura))
+    .slice(0, 5)
+    .map((l) => ({ valor: l.valor }));
 
-  const ultimasCinco = leituras.slice(0, 5);
+  // Complemento: se faltam leituras brutas (ex.: o job de agregação horária
+  // acabou de rodar — minuto 1 de cada hora — e apagou as leituras já
+  // processadas), usa as médias horárias mais recentes já calculadas em
+  // vez de bloquear a dispensa só por causa do momento em que o usuário
+  // tentou (o sensor pode já estar normal há muito tempo).
+  if (amostras.length < 5) {
+    const horariasSnap = await db.ref(`leituras_horarias/${dispositivoId}`).once('value');
+    const mediasHorarias = Object.entries(horariasSnap.val() || {})
+      .filter(([, h]) => typeof h[tipo] === 'number')
+      .sort(([hourKeyA], [hourKeyB]) => hourKeyB.localeCompare(hourKeyA)) // "YYYY-MM-DDTHH" ordena cronologicamente como string
+      .map(([, h]) => ({ valor: h[tipo] }));
 
-  if (ultimasCinco.length < 5) {
+    for (const media of mediasHorarias) {
+      if (amostras.length >= 5) break;
+      amostras.push(media);
+    }
+  }
+
+  if (amostras.length < 5) {
     return {
       encontrado: true,
       permitido: false,
-      motivo: `Ainda não há 5 leituras recentes de ${tipo} para confirmar a normalização (${ultimasCinco.length}/5).`,
+      motivo: `Ainda não há 5 leituras/médias recentes de ${tipo} para confirmar a normalização (${amostras.length}/5).`,
     };
   }
 
-  const todasNormais = ultimasCinco.every((l) => l.valor < limite);
+  const todasNormais = amostras.every((a) => a.valor < limite);
   if (!todasNormais) {
     return {
       encontrado: true,
       permitido: false,
-      motivo: `Ainda há leituras de ${tipo} acima do limite seguro nas últimas 5 amostras.`,
+      motivo: `Ainda há leituras de ${tipo} acima do limite seguro nas últimas amostras.`,
     };
   }
 

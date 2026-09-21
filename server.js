@@ -35,6 +35,15 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
 });
 
+// ATENÇÃO — ordem importa: dispositivosRouter e alertasRouter cobrem só
+// sub-rotas específicas (ex.: PATCH /:id/nome, GET /lista) sob os mesmos
+// prefixos que recursosRouter usa para os GETs genéricos (crudSimples).
+// Como estão montados ANTES de recursosRouter, requisições que não batem
+// com nenhuma rota deles (ex.: GET /api/dispositivos) "passam adiante" até
+// caírem no recursosRouter no fim da cadeia. Se adicionar uma rota nova em
+// dispositivosRouter/alertasRouter com o mesmo método+path de uma rota do
+// recursosRouter, ela vai sombrear a outra silenciosamente — confira aqui
+// antes de adicionar novas rotas a esses arquivos.
 app.use('/api/leituras', leiturasRouter);
 app.use('/api/resumo', resumoRouter);
 app.use('/api/admin', adminRouter);

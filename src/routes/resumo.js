@@ -69,7 +69,7 @@ router.get('/', authenticateApp, appLimiter, async (req, res) => {
       geradoEm: new Date().toISOString(),
       totalDispositivos: resumo.length,
       dispositivosOnline: resumo.filter((d) => d.online).length,
-      totalAlertasNaoResolvidos: Object.values(alertasNaoResolvidosPorDispositivo).reduce((a, b) => a + b, 0),
+      totalAlertasNaoResolvidos: resumo.reduce((soma, d) => soma + d.alertasNaoResolvidos, 0),
       contagemPorStatus,
       dispositivos: resumo,
     });
