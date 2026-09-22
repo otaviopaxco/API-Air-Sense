@@ -1,5 +1,7 @@
 # ESP32-AirSense API
 
+<img width="1080" height="608" alt="AirSenseIndustria" src="https://github.com/user-attachments/assets/eafe7747-24eb-4ba5-b2de-a78c09b5857d" />
+
 API em Node.js/Express que recebe leituras de sensores (CO2, CH4, VOC, Temperatura, Umidade) enviadas por dispositivos ESP32, valida, grava no Firebase Realtime Database, agrega automaticamente em médias horárias, expira dados antigos, e disponibiliza tudo para um app/dashboard.
 
 ## Arquitetura de dados
